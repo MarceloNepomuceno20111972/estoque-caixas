@@ -483,7 +483,7 @@ function processarPlanilha(rows, fileName) {
   document.getElementById('btn-salvar').style.display = '';
   document.getElementById('btn-carga').style.display = '';
   document.getElementById('last-update').innerHTML = `PLANILHA<br>${fileName}`;
-  setStatus(`${parsed.length} registros lidos · clique em SALVAR NO SERVIDOR`, 'ok');
+  setStatus(`${parsed.length} registros lidos · use SALVAR HOJE (rotina) ou CARGA COMPLETA (1ª vez)`, 'ok');
 
   inicializarDashboard();
   document.getElementById('upload-screen').style.display = 'none';
