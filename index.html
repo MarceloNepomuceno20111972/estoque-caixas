@@ -315,23 +315,34 @@ async function sbFetch(path, opts={}) {
 async function carregarDoSupabase() {
   setSyncStatus('loading');
   try {
-    // Busca todos os dados ordenados por data
-    const data = await sbFetch(`${TABELA}?select=data_str,produto,codigo_empresa,quantidade&order=data_str.asc&limit=200000`);
-    if (!data || data.length === 0) {
+    // Pagina a leitura — Supabase retorna máximo 1000 por request
+    const PAGE = 1000;
+    let offset = 0;
+    let todos = [];
+    while (true) {
+      const page = await sbFetch(
+        `${TABELA}?select=data_str,produto,codigo_empresa,quantidade&order=data_str.asc&limit=${PAGE}&offset=${offset}`,
+        { headers: { 'Range-Unit': 'items', 'Range': `${offset}-${offset+PAGE-1}` } }
+      );
+      if (!page || page.length === 0) break;
+      todos = todos.concat(page);
+      if (page.length < PAGE) break;
+      offset += PAGE;
+    }
+    if (todos.length === 0) {
       setSyncStatus('empty');
       return false;
     }
-    allData = data
-      .filter(r => r.data_str && /^20\d{2}-\d{2}-\d{2}$/.test(r.data_str))
+    allData = todos
+      .filter(r => r.data_str && /^20[0-9]{2}-[0-9]{2}-[0-9]{2}$/.test(r.data_str))
       .map(r => ({
         dateStr: r.data_str,
         empresa: r.codigo_empresa,
         produto: r.produto,
         qtd: parseFloat(r.quantidade) || 0
       }));
-    // Última atualização
-    const ultima = data.reduce((a,b) => a.data_str > b.data_str ? a : b);
-    document.getElementById('sync-ultima').textContent = `Última carga: ${fmtDate(ultima.data_str)}`;
+    const ultima = todos.reduce((a,b) => a.data_str > b.data_str ? a : b);
+    document.getElementById('sync-ultima').textContent = `Última carga: ${fmtDate(ultima.data_str)} · ${allData.length.toLocaleString('pt-BR')} registros`;
     setSyncStatus('online');
     return true;
   } catch(e) {
