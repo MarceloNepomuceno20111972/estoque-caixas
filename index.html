@@ -164,8 +164,11 @@
     </div>
     <div class="header-right">
       <div class="last-update" id="last-update"></div>
-      <button class="btn-sm btn-green" id="btn-salvar" onclick="salvarNoSupabase()" style="display:none">
-        ↑ SALVAR NO SERVIDOR
+      <button class="btn-sm btn-green" id="btn-salvar" onclick="salvarNoSupabase(false)" style="display:none" title="Salva apenas o dia mais recente da planilha">
+        ↑ SALVAR HOJE
+      </button>
+      <button class="btn-sm" id="btn-carga" onclick="salvarNoSupabase(true)" style="display:none;border-color:var(--purple);color:var(--purple)" title="Grava todos os dias da planilha — use na primeira vez ou para corrigir histórico">
+        ⬆ CARGA COMPLETA
       </button>
       <button class="btn-sm">
         <input type="file" id="reload-input" accept=".xlsx,.xls">
@@ -359,27 +362,32 @@ async function inserirLote(rows) {
 }
 
 // ── SALVAR NO SUPABASE ───────────────────────────────────
-async function salvarNoSupabase() {
+async function salvarNoSupabase(cargaCompleta = false) {
   if (!dadosParaSalvar || dadosParaSalvar.length === 0) return;
 
-  // Descobrir qual data está no upload atual (data mais recente da planilha)
   const datas = [...new Set(dadosParaSalvar.map(r => r.data_str))].sort();
   const dataHoje = datas[datas.length - 1];
 
   document.getElementById('btn-salvar').disabled = true;
   document.getElementById('progress-wrap').style.display = 'flex';
-  document.getElementById('progress-label').textContent = `Apagando ${fmtDate(dataHoje)}...`;
 
   try {
-    // 1. Apaga somente o dia mais recente da planilha
-    await deletarDia(dataHoje);
+    if (cargaCompleta) {
+      // Carga inicial: apaga todos os dias da planilha e regrava tudo
+      document.getElementById('progress-label').textContent = `Carga completa: ${datas.length} dias...`;
+      for (const d of datas) { await deletarDia(d); }
+      document.getElementById('progress-label').textContent = `Gravando ${dadosParaSalvar.length} registros...`;
+      await inserirLote(dadosParaSalvar);
+    } else {
+      // Rotina diária: apaga e regrava só o dia mais recente
+      document.getElementById('progress-label').textContent = `Apagando ${fmtDate(dataHoje)}...`;
+      await deletarDia(dataHoje);
+      const linhasDoDia = dadosParaSalvar.filter(r => r.data_str === dataHoje);
+      document.getElementById('progress-label').textContent = `Gravando ${linhasDoDia.length} registros...`;
+      await inserirLote(linhasDoDia);
+    }
 
-    // 2. Insere as linhas do dia
-    const linhasDoDia = dadosParaSalvar.filter(r => r.data_str === dataHoje);
-    document.getElementById('progress-label').textContent = `Gravando ${linhasDoDia.length} registros...`;
-    await inserirLote(linhasDoDia);
-
-    // 3. Recarrega do servidor para sincronizar tudo
+    // Recarrega tudo do servidor
     document.getElementById('progress-label').textContent = 'Sincronizando...';
     await carregarDoSupabase();
     inicializarDashboard();
@@ -392,6 +400,7 @@ async function salvarNoSupabase() {
   } finally {
     document.getElementById('progress-wrap').style.display = 'none';
     document.getElementById('btn-salvar').disabled = false;
+    document.getElementById('btn-carga').disabled = false;
   }
 }
 
@@ -463,15 +472,16 @@ function processarPlanilha(rows, fileName) {
     quantidade: r.qtd
   }));
 
-  // Merge com dados já existentes no allData
-  // Remove do allData o dia mais recente da planilha (será substituído)
-  const datas = [...new Set(parsed.map(r => r.dateStr))].sort();
-  const dataHoje = datas[datas.length - 1];
-  allData = allData.filter(r => r.dateStr !== dataHoje);
+  // Mescla: remove do allData apenas as datas presentes na planilha, insere as novas
+  // Isso preserva histórico do Supabase que não está na planilha
+  const datasNaPlanilha = new Set(parsed.map(r => r.dateStr));
+  const dataHoje = [...datasNaPlanilha].sort().pop();
+  allData = allData.filter(r => !datasNaPlanilha.has(r.dateStr));
   allData = allData.concat(parsed.map(r => ({ dateStr: r.dateStr, empresa: r.empresa, produto: r.produto, qtd: r.qtd })));
 
   modoUpload = true;
   document.getElementById('btn-salvar').style.display = '';
+  document.getElementById('btn-carga').style.display = '';
   document.getElementById('last-update').innerHTML = `PLANILHA<br>${fileName}`;
   setStatus(`${parsed.length} registros lidos · clique em SALVAR NO SERVIDOR`, 'ok');
 
