@@ -164,11 +164,8 @@
     </div>
     <div class="header-right">
       <div class="last-update" id="last-update"></div>
-      <button class="btn-sm btn-green" id="btn-salvar" onclick="salvarNoSupabase(false)" style="display:none" title="Salva apenas o dia mais recente da planilha">
-        ↑ SALVAR HOJE
-      </button>
-      <button class="btn-sm" id="btn-carga" onclick="salvarNoSupabase(true)" style="display:none;border-color:var(--purple);color:var(--purple)" title="Grava todos os dias da planilha — use na primeira vez ou para corrigir histórico">
-        ⬆ CARGA COMPLETA
+      <button class="btn-sm btn-green" id="btn-salvar" onclick="salvarNoSupabase()" style="display:none" title="Apaga todos os dados do servidor e salva a planilha atual (90 dias)">
+        ↑ SALVAR
       </button>
       <button class="btn-sm">
         <input type="file" id="reload-input" accept=".xlsx,.xls">
@@ -364,32 +361,25 @@ async function inserirLote(rows) {
 }
 
 // ── SALVAR NO SUPABASE ───────────────────────────────────
-async function salvarNoSupabase(cargaCompleta = false) {
+async function salvarNoSupabase() {
   if (!dadosParaSalvar || dadosParaSalvar.length === 0) return;
 
   const datas = [...new Set(dadosParaSalvar.map(r => r.data_str))].sort();
   const dataHoje = datas[datas.length - 1];
+  const total = dadosParaSalvar.length;
 
   document.getElementById('btn-salvar').disabled = true;
   document.getElementById('progress-wrap').style.display = 'flex';
 
   try {
-    if (cargaCompleta) {
-      // Carga inicial: apaga todos os dias da planilha e regrava tudo
-      document.getElementById('progress-label').textContent = `Carga completa: ${datas.length} dias...`;
-      for (const d of datas) { await deletarDia(d); }
-      document.getElementById('progress-label').textContent = `Gravando ${dadosParaSalvar.length} registros...`;
-      await inserirLote(dadosParaSalvar);
-    } else {
-      // Rotina diária: apaga e regrava só o dia mais recente
-      document.getElementById('progress-label').textContent = `Apagando ${fmtDate(dataHoje)}...`;
-      await deletarDia(dataHoje);
-      const linhasDoDia = dadosParaSalvar.filter(r => r.data_str === dataHoje);
-      document.getElementById('progress-label').textContent = `Gravando ${linhasDoDia.length} registros...`;
-      await inserirLote(linhasDoDia);
-    }
+    // Apaga TUDO no Supabase e regrava a planilha completa (90 dias)
+    document.getElementById('progress-label').textContent = `Limpando servidor...`;
+    await sbFetch(`${TABELA}?id=gte.0`, { method: 'DELETE', prefer: 'return=minimal' });
 
-    // Recarrega tudo do servidor
+    document.getElementById('progress-label').textContent = `Gravando ${total} registros...`;
+    await inserirLote(dadosParaSalvar);
+
+    // Recarrega do servidor — garante allData com histórico completo
     document.getElementById('progress-label').textContent = 'Sincronizando...';
     await carregarDoSupabase();
     inicializarDashboard();
@@ -402,7 +392,6 @@ async function salvarNoSupabase(cargaCompleta = false) {
   } finally {
     document.getElementById('progress-wrap').style.display = 'none';
     document.getElementById('btn-salvar').disabled = false;
-    document.getElementById('btn-carga').disabled = false;
   }
 }
 
@@ -432,7 +421,7 @@ function handleFile(file) {
   if (!file) return;
   setStatus('Lendo planilha...', '');
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const wb = XLSX.read(e.target.result, { type:'array', cellDates:false });
       const ws = wb.Sheets['Base Dados'];
@@ -466,7 +455,7 @@ function processarPlanilha(rows, fileName) {
     };
   }).filter(r => r.dateStr && r.dateStr.startsWith('20'));
 
-  // Prepara rows para Supabase
+  // Prepara rows para Supabase (só o dia mais recente da planilha)
   dadosParaSalvar = parsed.map(r => ({
     data_str: r.dateStr,
     produto: r.produto,
@@ -474,18 +463,22 @@ function processarPlanilha(rows, fileName) {
     quantidade: r.qtd
   }));
 
-  // Mescla: remove do allData apenas as datas presentes na planilha, insere as novas
-  // Isso preserva histórico do Supabase que não está na planilha
+  // Substitui localmente as datas da planilha no allData
+  // O allData já tem o histórico do Supabase (carregado ao abrir)
+  // O SALVAR vai apagar tudo no servidor e regravar esta planilha completa
   const datasNaPlanilha = new Set(parsed.map(r => r.dateStr));
-  const dataHoje = [...datasNaPlanilha].sort().pop();
   allData = allData.filter(r => !datasNaPlanilha.has(r.dateStr));
-  allData = allData.concat(parsed.map(r => ({ dateStr: r.dateStr, empresa: r.empresa, produto: r.produto, qtd: r.qtd })));
+  allData = allData.concat(parsed.map(r => ({
+    dateStr: r.dateStr,
+    empresa: r.empresa,
+    produto: r.produto,
+    qtd: r.qtd
+  })));
 
   modoUpload = true;
   document.getElementById('btn-salvar').style.display = '';
-  document.getElementById('btn-carga').style.display = '';
   document.getElementById('last-update').innerHTML = `PLANILHA<br>${fileName}`;
-  setStatus(`${parsed.length} registros lidos · use SALVAR HOJE (rotina) ou CARGA COMPLETA (1ª vez)`, 'ok');
+  setStatus(`${parsed.length} registros lidos · clique em SALVAR para gravar no servidor`, 'ok');
 
   inicializarDashboard();
   document.getElementById('upload-screen').style.display = 'none';
