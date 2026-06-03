@@ -374,7 +374,7 @@ async function salvarNoSupabase() {
   try {
     // Apaga TUDO no Supabase e regrava a planilha completa (90 dias)
     document.getElementById('progress-label').textContent = `Limpando servidor...`;
-    await sbFetch(`${TABELA}?id=gte.0`, { method: 'DELETE', prefer: 'return=minimal' });
+    await sbFetch(`${TABELA}?data_str=gte.2000-01-01`, { method: 'DELETE', prefer: 'return=minimal' });
 
     document.getElementById('progress-label').textContent = `Gravando ${total} registros...`;
     await inserirLote(dadosParaSalvar);
